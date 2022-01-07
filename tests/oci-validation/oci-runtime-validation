@@ -20,7 +20,6 @@ export TMPDIR=/var/tmp
 export XDG_RUNTIME_DIR=/run
 
 cd $GOPATH/src/github.com/opencontainers/runtime-tools
-make -j $(nproc)
 
 # Skip:
 # cgroup tests as they require special configurations on the host
@@ -28,8 +27,9 @@ make -j $(nproc)
 # misc_props, kill, hostname, process and pidfile are flaky.
 # start - expect to not fail if the specified process doesn't exist (support process unset)
 # hooks_stdin - tests are racy
-export VALIDATION_TESTS=$(make print-validation-tests | tr ' ' '\n' | egrep -v "(hooks_stdin|misc_props|start|cgroup|readonly_paths|kill|masked_paths|seccomp|process|pidfile|hostname)" | tr '\n' ' ')
+#export VALIDATION_TESTS=$(make print-validation-tests | tr ' ' '\n' | egrep -v "(hooks_stdin|misc_props|start|cgroup|readonly_paths|kill|masked_paths|seccomp|process|pidfile|hostname)" | tr '\n' ' ')
+export VALIDATION_TESTS="./validation/linux_rootfs_propagation/linux_rootfs_propagation.t"
 
 export RUNTIME="/crun/crun"
 
-make localvalidation
+make runtimetest validation-executables localvalidation
