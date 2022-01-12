@@ -197,8 +197,12 @@ clang-format:
 # do not format files that were copied into the source directory.
 	git ls-files src tests | egrep "\\.[hc]" | grep -v "chroot_realpath.c\|cloned_binary.c\|signals.c\|mount_flags.c" | xargs clang-format -style=file -i
 
-shellcheck: SHELL_FILES=$(shell git ls-files \*.sh | grep -v ^build-aux/)
+shellcheck shfmt: SHELL_FILES=$(shell git ls-files \*.sh | grep -v ^build-aux/)
+
 shellcheck:
 	shellcheck $(SHELLCHECK_OPTIONS) $(SHELL_FILES)
 
-.PHONY: coverity sync generate-rust-bindings generate-signals.c generate-mount_flags.c clang-format shellcheck
+shfmt:
+	shfmt -w -d $(SHELL_FILES)
+
+.PHONY: coverity sync generate-rust-bindings generate-signals.c generate-mount_flags.c clang-format shellcheck shfmt

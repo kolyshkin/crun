@@ -8,7 +8,7 @@ VERBOSITY=${VERBOSITY:=}
 
 N_TESTS=7
 
-SINGLE_RUN_TIME=$(( RUN_TIME / N_TESTS ))
+SINGLE_RUN_TIME=$((RUN_TIME / N_TESTS))
 
 CORPUS=${CORPUS:=/testcases}
 
@@ -22,12 +22,12 @@ mkdir rootfs
 mkdir random-data
 
 function run_test {
-    export FUZZING_MODE=$1
-    TEST_CASE=$2
+	export FUZZING_MODE=$1
+	TEST_CASE=$2
 
-    result=$(honggfuzz --exit_upon_crash $VERBOSITY --run_time "$SINGLE_RUN_TIME" --timeout $TIMEOUT -T -i "$TEST_CASE" -- tests/tests_libcrun_fuzzer 2>&1 | tail -n 2)
-    echo "$result"
-    echo "$result" | grep -q crashes_count:0
+	result=$(honggfuzz --exit_upon_crash $VERBOSITY --run_time "$SINGLE_RUN_TIME" --timeout $TIMEOUT -T -i "$TEST_CASE" -- tests/tests_libcrun_fuzzer 2>&1 | tail -n 2)
+	echo "$result"
+	echo "$result" | grep -q crashes_count:0
 }
 
 run_test 0 $CORPUS/config-json
