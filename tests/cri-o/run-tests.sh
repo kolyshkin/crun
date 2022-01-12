@@ -7,12 +7,12 @@ fi
 set -e
 
 (
-cd /crun
-git clean -fdx
-./autogen.sh
-./configure CFLAGS='-Wall -Wextra -Werror' --prefix=/usr
-make -j "$(nproc)"
-make install
+	cd /crun
+	git clean -fdx
+	./autogen.sh
+	./configure CFLAGS='-Wall -Wextra -Werror' --prefix=/usr
+	make -j "$(nproc)"
+	make install
 )
 
 # make sure runc is not used

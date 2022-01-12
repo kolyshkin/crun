@@ -9,11 +9,11 @@ if test "$(id -u)" != 0; then
 fi
 
 (
-cd /crun
-git clean -fdx
-./autogen.sh
-./configure
-make -j "$(nproc)"
+	cd /crun
+	git clean -fdx
+	./autogen.sh
+	./configure
+	make -j "$(nproc)"
 )
 
 export GO111MODULE=off
