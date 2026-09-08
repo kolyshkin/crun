@@ -745,6 +745,43 @@ crun_dir_p (const char *path, bool nofollow, libcrun_error_t *err)
   return crun_dir_p_at (AT_FDCWD, path, nofollow, err);
 }
 
+/* Detect the user namespace from the mapping in /proc/self/uid_map.  It cannot
+   tell apart the initial user namespace from a user namespace with a full
+   identity mapping, so it is used only as a fallback.  */
+static int
+check_running_in_user_namespace_uid_map (libcrun_error_t *err)
+{
+  cleanup_free char *buffer = NULL;
+  size_t len;
+  int ret;
+
+  ret = read_all_file ("/proc/self/uid_map", &buffer, &len, err);
+  if (UNLIKELY (ret < 0))
+    {
+      /* If the file does not exist, then the kernel does not support user namespaces and we for sure aren't in one.  */
+      if (crun_error_get_errno (err) == ENOENT)
+        {
+          crun_error_release (err);
+          return 0;
+        }
+      return ret;
+    }
+
+  return strstr (buffer, "4294967295") ? 0 : 1;
+}
+
+/* OpenVZ exposes /proc/vz both on the host and inside containers, while
+   /proc/bc is only exposed on the host.  This follows systemd's OpenVZ
+   detection.  */
+static bool
+running_in_openvz ()
+{
+  if (access ("/proc/vz", F_OK) < 0)
+    return false;
+
+  return access ("/proc/bc", F_OK) < 0 && errno == ENOENT;
+}
+
 int
 check_running_in_user_namespace (libcrun_error_t *err)
 {
@@ -768,7 +805,26 @@ check_running_in_user_namespace (libcrun_error_t *err)
       return crun_make_error (err, errno, "stat `/proc/self/ns/user`");
     }
 
-  run_in_userns = st.st_ino == PROC_USER_INIT_INO ? 0 : 1;
+  /* The inode is definitive when it matches.  OpenVZ virtualizes the namespace
+     inode numbers exposed through procfs, so a mismatch must fall back to the
+     uid_map detection there.  */
+  if (st.st_ino == PROC_USER_INIT_INO)
+    {
+      run_in_userns = 0;
+      return run_in_userns;
+    }
+
+  if (running_in_openvz ())
+    {
+      ret = check_running_in_user_namespace_uid_map (err);
+      if (UNLIKELY (ret < 0))
+        return ret;
+
+      run_in_userns = ret;
+      return run_in_userns;
+    }
+
+  run_in_userns = 1;
   return run_in_userns;
 }
 
