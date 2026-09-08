@@ -508,6 +508,11 @@ gen_annotations (json_gen_ctx *gen, json_map_string_string *annotations)
 
   for (i = 0; i < annotations->len; i++)
     {
+      /* An annotation whose value is null in the document is parsed into a
+         NULL, which cannot be emitted as a JSON string; leave it out.  */
+      if (annotations->keys[i] == NULL || annotations->values[i] == NULL)
+        continue;
+
       GEN_STR (gen, annotations->keys[i]);
       GEN_STR (gen, annotations->values[i]);
     }
@@ -851,8 +856,15 @@ setup_environment (runtime_spec_schema_config_schema *def, uid_t container_uid, 
       size_t i;
 
       for (i = 0; i < def->process->env_len; i++)
-        if (putenv (def->process->env[i]) < 0)
-          return crun_make_error (err, errno, "putenv `%s`", def->process->env[i]);
+        {
+          /* A null element of the array of variables is parsed into a NULL,
+             which putenv(3) cannot be handed.  */
+          if (def->process->env[i] == NULL)
+            return crun_make_error (err, EINVAL, "environment variable is not specified");
+
+          if (putenv (def->process->env[i]) < 0)
+            return crun_make_error (err, errno, "putenv `%s`", def->process->env[i]);
+        }
     }
 
   if (getenv ("HOME") == NULL)

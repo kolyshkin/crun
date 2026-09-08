@@ -784,7 +784,14 @@ get_mount_flags_or_option (const char *name, int current_flags, unsigned long *e
 {
   int found;
   __attribute__ ((unused)) cleanup_free char *prev = NULL;
-  unsigned long flags = get_mount_flags (name, current_flags, &found, extra_flags, rec_clear, rec_set);
+  unsigned long flags;
+
+  /* A null element of the array of options in the configuration is parsed
+     into a NULL, which is not an option to be honored.  */
+  if (name == NULL)
+    return 0;
+
+  flags = get_mount_flags (name, current_flags, &found, extra_flags, rec_clear, rec_set);
   if (found)
     {
       /* MS_SYNCHRONOUS and MS_DIRSYNC cannot be set through fsmount()
@@ -1087,7 +1094,7 @@ mount_option_exists (runtime_spec_schema_defs_mount *mnt, const char *option)
 {
   size_t i;
   for (i = 0; i < mnt->options_len; i++)
-    if (strcmp (mnt->options[i], option) == 0)
+    if (mnt->options[i] != NULL && strcmp (mnt->options[i], option) == 0)
       return true;
   return false;
 }
@@ -3684,7 +3691,7 @@ mount_inherits_mountpoint_mode (runtime_spec_schema_defs_mount *mount)
     return false;
 
   for (i = 0; i < mount->options_len; i++)
-    if (has_prefix (mount->options[i], "mode="))
+    if (mount->options[i] != NULL && has_prefix (mount->options[i], "mode="))
       return false;
 
   return true;
@@ -4732,6 +4739,11 @@ libcrun_set_sysctl (libcrun_container_t *container, libcrun_error_t *err)
       int ret;
       char *it;
 
+      /* A sysctl whose value is null in the document is parsed into a NULL,
+         and there is nothing to write to the file.  */
+      if (def->linux->sysctl->keys[i] == NULL || def->linux->sysctl->values[i] == NULL)
+        return crun_make_error (err, EINVAL, "sysctl value is not specified");
+
       name = xstrdup (def->linux->sysctl->keys[i]);
       for (it = name; *it; it++)
         if (*it == '.')
@@ -5283,6 +5295,9 @@ is_bind_mount (runtime_spec_schema_defs_mount *mnt, bool *recursive, bool *src_n
 
   for (i = 0; i < mnt->options_len; i++)
     {
+      if (mnt->options[i] == NULL)
+        continue;
+
       if (strcmp (mnt->options[i], "bind") == 0)
         {
           ret = true;
@@ -5315,6 +5330,9 @@ get_idmapped_option (runtime_spec_schema_defs_mount *mnt, bool *recursive)
 
   for (i = 0; i < mnt->options_len; i++)
     {
+      if (mnt->options[i] == NULL)
+        continue;
+
       if (has_prefix (mnt->options[i], "idmap"))
         {
           *recursive = false;
