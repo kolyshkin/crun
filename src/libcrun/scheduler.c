@@ -209,6 +209,9 @@ libcrun_set_scheduler (pid_t pid, runtime_spec_schema_config_schema_process *pro
     {
       char *key = process->scheduler->flags[s];
 
+      if (key == NULL)
+        return crun_make_error (err, EINVAL, "scheduler flag is not specified");
+
       if (strcmp (key, "SCHED_FLAG_RESET_ON_FORK") == 0)
         attr.sched_flags |= SCHED_FLAG_RESET_ON_FORK;
       else if (strcmp (key, "SCHED_FLAG_RECLAIM") == 0)

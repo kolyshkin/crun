@@ -339,6 +339,7 @@ PYTHON_TESTS = tests/test_capabilities.py \
 	tests/test_net_device.py \
 	tests/test_cgroup_resources.py \
 	tests/test_error_handling.py \
+	tests/test_null_config_values.py \
 	tests/test_custom_handler.py
 
 if BUILD_STATIC_TESTS

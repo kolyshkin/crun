@@ -249,6 +249,9 @@ libcrun_apply_seccomp (int infd, int listener_receiver_fd, const char *receiver_
       size_t i = 0;
       for (i = 0; i < seccomp_flags_len; i++)
         {
+          if (seccomp_flags[i] == NULL)
+            return crun_make_error (err, EINVAL, "seccomp flag is not specified");
+
           if (strcmp (seccomp_flags[i], "SECCOMP_FILTER_FLAG_TSYNC") == 0)
             flags |= SECCOMP_FILTER_FLAG_TSYNC;
           else if (strcmp (seccomp_flags[i], "SECCOMP_FILTER_FLAG_SPEC_ALLOW") == 0)
@@ -754,6 +757,9 @@ libcrun_generate_seccomp (struct libcrun_seccomp_gen_ctx_s *gen_ctx, libcrun_err
       char *end, lowercase_arch[32] = {
         0,
       };
+
+      if (arch == NULL)
+        return crun_make_error (err, EINVAL, "seccomp architecture is not specified");
 
       if (has_prefix (arch, "SCMP_ARCH_"))
         arch += 10;

@@ -277,9 +277,10 @@ crun_command_exec (struct crun_global_arguments *global_args, int argc, char **a
       process = xmalloc0 (sizeof (*process));
       int i;
 
-      process->args_len = argc;
-      process->args = xmalloc0 ((argc + 1) * sizeof (*process->args));
-      for (i = 0; i < argc - first_arg; i++)
+      /* argv[first_arg] is the container id, the command follows it.  */
+      process->args_len = argc - first_arg - 1;
+      process->args = xmalloc0 ((process->args_len + 1) * sizeof (*process->args));
+      for (i = 0; i < (int) process->args_len; i++)
         process->args[i] = xstrdup (argv[first_arg + i + 1]);
       process->args[i] = NULL;
       if (exec_options.cwd)
