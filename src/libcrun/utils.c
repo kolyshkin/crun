@@ -51,6 +51,7 @@
 #  include <stdatomic.h>
 #else
 #  define atomic_long volatile long
+#  define atomic_int volatile int
 #endif
 #include "syscalls.h"
 
@@ -747,7 +748,7 @@ crun_dir_p (const char *path, bool nofollow, libcrun_error_t *err)
 int
 check_running_in_user_namespace (libcrun_error_t *err)
 {
-  static int run_in_userns = -1;
+  static atomic_int run_in_userns = -1;
   struct stat st;
   int ret;
 
