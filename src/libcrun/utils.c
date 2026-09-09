@@ -794,37 +794,33 @@ check_running_in_user_namespace (libcrun_error_t *err)
     return ret;
 
   ret = stat ("/proc/self/ns/user", &st);
-  if (UNLIKELY (ret < 0))
+  if (ret == 0)
     {
-      /* If the file does not exist, then the kernel does not support user namespaces and we for sure aren't in one.  */
-      if (errno == ENOENT)
+      /* The inode is definitive when it matches.  OpenVZ virtualizes the
+         namespace inode numbers exposed through procfs, so a mismatch must fall
+         back to the uid_map detection there.  */
+      if (st.st_ino == PROC_USER_INIT_INO)
         {
           run_in_userns = 0;
           return run_in_userns;
         }
-      return crun_make_error (err, errno, "stat `/proc/self/ns/user`");
+
+      if (! running_in_openvz ())
+        {
+          run_in_userns = 1;
+          return run_in_userns;
+        }
     }
+  else if (UNLIKELY (errno != ENOENT))
+    return crun_make_error (err, errno, "stat `/proc/self/ns/user`");
 
-  /* The inode is definitive when it matches.  OpenVZ virtualizes the namespace
-     inode numbers exposed through procfs, so a mismatch must fall back to the
-     uid_map detection there.  */
-  if (st.st_ino == PROC_USER_INIT_INO)
-    {
-      run_in_userns = 0;
-      return run_in_userns;
-    }
+  /* Kernels older than 3.8 do not expose the user namespace here even though
+     they can still support user namespaces, so the uid_map is all we have.  */
+  ret = check_running_in_user_namespace_uid_map (err);
+  if (UNLIKELY (ret < 0))
+    return ret;
 
-  if (running_in_openvz ())
-    {
-      ret = check_running_in_user_namespace_uid_map (err);
-      if (UNLIKELY (ret < 0))
-        return ret;
-
-      run_in_userns = ret;
-      return run_in_userns;
-    }
-
-  run_in_userns = 1;
+  run_in_userns = ret;
   return run_in_userns;
 }
 
