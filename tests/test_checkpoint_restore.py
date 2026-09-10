@@ -284,6 +284,20 @@ def test_cr():
     return run_cr_test(conf)
 
 
+def test_cr_masked_paths():
+    if r := _check_cr_requirements():
+        return r
+
+    conf = base_config()
+    conf['process']['args'] = ['/init', 'pause']
+    add_all_namespaces(conf)
+    # Both a directory and a file.  A masked directory is a bind mount of a
+    # shared empty directory under the state root, which is an external
+    # mount for CRIU, and must be found under the same key on restore.
+    conf['linux']['maskedPaths'] = ['/sys/firmware', '/proc/kcore']
+    return run_cr_test(conf)
+
+
 def test_cr_with_ext_ns():
     if r := _check_cr_requirements(min_criu_version=31601):
         return r
@@ -404,6 +418,7 @@ def test_cr_with_annotation_config():
 
 all_tests = {
     "checkpoint-restore": test_cr,
+    "checkpoint-restore-masked-paths": test_cr_masked_paths,
     "checkpoint-restore-ext-ns": test_cr_with_ext_ns,
     "checkpoint-restore-pre-dump": test_cr_pre_dump,
     "checkpoint-restore-with-runc-config": test_cr_with_runc_config,

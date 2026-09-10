@@ -4233,6 +4233,11 @@ libcrun_container_checkpoint (libcrun_context_t *context, const char *id, libcru
   ret = read_container_config_from_state (&container, state_root, id, err);
   if (UNLIKELY (ret < 0))
     return ret;
+
+  /* Needed to use the same paths (e.g. the shared empty directory used for
+     masked paths) as the container runtime and restore do.  */
+  container->context = context;
+
   ret = libcrun_container_checkpoint_linux (&status, container, cr_options, err);
   if (UNLIKELY (ret < 0))
     return ret;
