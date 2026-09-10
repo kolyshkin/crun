@@ -819,6 +819,7 @@ libcrun_generate_seccomp (struct libcrun_seccomp_gen_ctx_s *gen_ctx, libcrun_err
   for (i = 0; i < seccomp->syscalls_len; i++)
     {
       size_t j;
+      bool multiple_args = false;
       int errno_ret = EPERM;
 
       if (seccomp->syscalls[i]->errno_ret_present)
@@ -834,6 +835,27 @@ libcrun_generate_seccomp (struct libcrun_seccomp_gen_ctx_s *gen_ctx, libcrun_err
 
       if (action == default_action)
         continue;
+
+      /* The argument indices do not depend on the syscall name, so validate
+         them once per entry.  Doing it here also makes an invalid index an
+         error even when every name below is unknown and skipped.  */
+      if (seccomp->syscalls[i]->args != NULL)
+        {
+          uint32_t count[6] = {};
+          size_t k;
+
+          for (k = 0; k < seccomp->syscalls[i]->args_len; k++)
+            {
+              uint32_t index = seccomp->syscalls[i]->args[k]->index;
+
+              if (index >= 6)
+                return crun_make_error (err, 0, "invalid seccomp index `%u`", index);
+
+              count[index]++;
+              if (count[index] > 1)
+                multiple_args = true;
+            }
+        }
 
       for (j = 0; j < seccomp->syscalls[i]->names_len; j++)
         {
@@ -857,21 +879,6 @@ libcrun_generate_seccomp (struct libcrun_seccomp_gen_ctx_s *gen_ctx, libcrun_err
           else
             {
               size_t k;
-              bool multiple_args = false;
-              uint32_t count[6] = {};
-
-              for (k = 0; k < seccomp->syscalls[i]->args_len; k++)
-                {
-                  uint32_t index;
-
-                  index = seccomp->syscalls[i]->args[k]->index;
-                  if (index >= 6)
-                    return crun_make_error (err, 0, "invalid seccomp index `%u`", index);
-
-                  count[index]++;
-                  if (count[index] > 1)
-                    multiple_args = true;
-                }
 
               /* If multiple rules refer to the same argument, treat the rules are in OR.  */
               if (multiple_args)

@@ -637,6 +637,60 @@ def test_seccomp_operator_missing_prefix():
 
     return run_and_expect_error(conf, ["seccomp get operator", "EQ"])
 
+def test_seccomp_invalid_arg_index():
+    """An argument index outside the 0-5 range must be rejected."""
+    conf = base_config()
+    add_all_namespaces(conf)
+
+    conf['linux']['seccomp'] = {
+        'defaultAction': 'SCMP_ACT_ALLOW',
+        'syscalls': [
+            {
+                'names': ['socket'],
+                'action': 'SCMP_ACT_ERRNO',
+                'errnoRet': 1,
+                'args': [
+                    {'index': 0, 'value': 1, 'op': 'SCMP_CMP_EQ'},
+                    {'index': 0, 'value': 2, 'op': 'SCMP_CMP_EQ'},
+                    {'index': 9, 'value': 3, 'op': 'SCMP_CMP_EQ'},
+                ]
+            }
+        ]
+    }
+
+    conf['process']['args'] = ['/init', 'true']
+
+    return run_and_expect_error(conf, ["invalid seccomp index `9`"])
+
+
+def test_seccomp_invalid_arg_index_unknown_syscall():
+    """An invalid argument index is reported even when the name is unknown.
+
+    Unknown syscall names are skipped with a warning, so the arguments have to
+    be validated independently of them, otherwise the bad index goes unnoticed.
+    """
+    conf = base_config()
+    add_all_namespaces(conf)
+
+    conf['linux']['seccomp'] = {
+        'defaultAction': 'SCMP_ACT_ALLOW',
+        'syscalls': [
+            {
+                'names': ['crun_no_such_syscall'],
+                'action': 'SCMP_ACT_ERRNO',
+                'errnoRet': 1,
+                'args': [
+                    {'index': 9, 'value': 3, 'op': 'SCMP_CMP_EQ'},
+                ]
+            }
+        ]
+    }
+
+    conf['process']['args'] = ['/init', 'true']
+
+    return run_and_expect_error(conf, ["invalid seccomp index `9`"])
+
+
 def test_seccomp_invalid_flag():
     """An unknown seccomp filter flag must be rejected."""
     conf = base_config()
@@ -671,6 +725,8 @@ all_tests = {
     "seccomp-action-missing-prefix": test_seccomp_action_missing_prefix,
     "seccomp-invalid-operator": test_seccomp_invalid_operator,
     "seccomp-operator-missing-prefix": test_seccomp_operator_missing_prefix,
+    "seccomp-invalid-arg-index": test_seccomp_invalid_arg_index,
+    "seccomp-invalid-arg-index-unknown-syscall": test_seccomp_invalid_arg_index_unknown_syscall,
     "seccomp-invalid-flag": test_seccomp_invalid_flag,
 }
 
