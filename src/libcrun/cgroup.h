@@ -103,6 +103,11 @@ int libcrun_update_cgroup_resources (struct libcrun_cgroup_status *status,
 
 int libcrun_cgroup_is_container_paused (struct libcrun_cgroup_status *status, bool *paused, libcrun_error_t *err);
 
+/* Move PID to the cgroup PATH, which is the container cgroup described by STATUS
+   or its sub-cgroup.  */
+int libcrun_cgroup_join_process (struct libcrun_cgroup_status *status, const char *path, pid_t pid, pid_t init_pid,
+                                 libcrun_error_t *err);
+
 int libcrun_cgroup_pause_unpause (struct libcrun_cgroup_status *status, const bool pause, libcrun_error_t *err);
 
 #endif

@@ -6465,24 +6465,19 @@ join_process_parent_helper (libcrun_context_t *context,
 
   if (need_move_to_cgroup)
     {
+      cleanup_cgroup_status struct libcrun_cgroup_status *cgroup_status = libcrun_cgroup_make_status (status);
+      cleanup_free char *final_cgroup = NULL;
+
       if (sub_cgroup)
         {
-          cleanup_free char *final_cgroup = NULL;
-
           ret = append_paths (&final_cgroup, err, status->cgroup_path, sub_cgroup, NULL);
           if (UNLIKELY (ret < 0))
             return ret;
+        }
 
-          ret = libcrun_move_process_to_cgroup (pid, status->pid, final_cgroup, false, err);
-          if (UNLIKELY (ret < 0))
-            return ret;
-        }
-      else
-        {
-          ret = libcrun_move_process_to_cgroup (pid, status->pid, status->cgroup_path, false, err);
-          if (UNLIKELY (ret < 0))
-            return ret;
-        }
+      ret = libcrun_cgroup_join_process (cgroup_status, final_cgroup ?: status->cgroup_path, pid, status->pid, err);
+      if (UNLIKELY (ret < 0))
+        return ret;
 
       /* Join the scheduler immediately after joining the cgroup.  */
       ret = libcrun_set_scheduler (pid, process, err);

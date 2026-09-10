@@ -2274,6 +2274,53 @@ exit:
   return cleanup_sd_bus_and_return (bus, m, reply, &error, ret);
 }
 
+/* Ask systemd to move PID to PATH, which is either the container scope
+   cgroup or its sub-cgroup.  This works even when the caller has no write
+   access to the cgroup.procs file of the common ancestor of the source and
+   the destination cgroups, as it is the case for a rootless user in a login
+   session, which is outside of user@.service.  */
+static int
+libcrun_attach_process_systemd (struct libcrun_cgroup_status *cgroup_status,
+                                const char *path, pid_t pid,
+                                libcrun_error_t *err)
+{
+  const char *scope = cgroup_status->scope;
+  sd_bus_error error = SD_BUS_ERROR_NULL;
+  cleanup_free char *scope_path = NULL;
+  sd_bus_message *reply = NULL;
+  const char *subcgroup;
+  const char *last;
+  sd_bus *bus = NULL;
+  size_t len;
+  int sd_err, ret;
+
+  if (is_empty_string (scope))
+    return crun_make_error (err, 0, "cannot attach process to cgroup: no systemd scope");
+
+  /* The sub-cgroup is relative to the scope cgroup.  */
+  scope_path = get_cgroup_scope_path (path, scope);
+  if (scope_path == NULL)
+    return crun_make_error (err, 0, "cannot attach process to cgroup: empty path");
+  last = strrchr (scope_path, '/');
+  if (last == NULL || strcmp (last + 1, scope) != 0)
+    return crun_make_error (err, 0, "cannot find scope `%s` in cgroup path `%s`", scope, path);
+  len = strlen (scope_path);
+  subcgroup = path[len] ? path + len : "/";
+
+  ret = open_sd_bus_connection (&bus, err);
+  if (UNLIKELY (ret < 0))
+    return ret;
+
+  sd_err = sd_bus_call_method (bus, "org.freedesktop.systemd1", "/org/freedesktop/systemd1",
+                               "org.freedesktop.systemd1.Manager", "AttachProcessesToUnit",
+                               &error, &reply, "ssau", scope, subcgroup, 1, (uint32_t) pid);
+  if (UNLIKELY (sd_err < 0))
+    ret = crun_make_error (err, sd_bus_error_get_errno (&error), "sd-bus call AttachProcessesToUnit: %s",
+                           error.message ?: error.name);
+
+  return cleanup_sd_bus_and_return (bus, NULL, reply, &error, ret);
+}
+
 #else
 static int
 libcrun_cgroup_enter_systemd (struct libcrun_cgroup_args *args,
@@ -2307,6 +2354,18 @@ libcrun_update_resources_systemd (struct libcrun_cgroup_status *cgroup_status,
 
   return crun_make_error (err, ENOTSUP, "systemd not supported");
 }
+
+static int
+libcrun_attach_process_systemd (struct libcrun_cgroup_status *cgroup_status,
+                                const char *path, pid_t pid,
+                                libcrun_error_t *err)
+{
+  (void) cgroup_status;
+  (void) path;
+  (void) pid;
+
+  return crun_make_error (err, ENOTSUP, "systemd not supported");
+}
 #endif
 
 struct libcrun_cgroup_manager cgroup_manager_systemd = {
@@ -2314,4 +2373,5 @@ struct libcrun_cgroup_manager cgroup_manager_systemd = {
   .create_cgroup = libcrun_cgroup_enter_systemd,
   .destroy_cgroup = libcrun_destroy_cgroup_systemd,
   .update_resources = libcrun_update_resources_systemd,
+  .attach_process = libcrun_attach_process_systemd,
 };
