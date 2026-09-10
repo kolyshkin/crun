@@ -363,6 +363,53 @@ def test_seccomp_args_mixed_indices():
     return -1
 
 
+def test_seccomp_cache_errno_ret():
+    """A different errnoRet must not reuse the filter cached for another one.
+
+    The generated filter is cached under a checksum of the seccomp
+    configuration, so everything that affects the filter has to be part of
+    that checksum.  errnoRet used to be left out, and two configurations
+    differing only by it shared a cache entry: the second container silently
+    got the filter built for the first one.
+    """
+    def run_with_errno_ret(errno_ret):
+        conf = base_config()
+        add_all_namespaces(conf)
+        conf['linux']['seccomp'] = {
+            'defaultAction': 'SCMP_ACT_ALLOW',
+            'syscalls': [
+                {
+                    'names': ['socket'],
+                    'action': 'SCMP_ACT_ERRNO',
+                    'errnoRet': errno_ret,
+                    'args': [
+                        {'index': 0, 'value': 2, 'op': 'SCMP_CMP_EQ'}
+                    ]
+                }
+            ]
+        }
+        conf['process']['args'] = ['/init', 'socket', '2']
+
+        try:
+            run_and_get_output(conf)
+        except subprocess.CalledProcessError as e:
+            return e.output.decode('utf-8', errors='ignore') if e.output else ''
+        return None
+
+    # Both runs share the state root, and so the seccomp cache.
+    out = run_with_errno_ret(1)
+    if out is None or 'Operation not permitted' not in out:
+        logger.info("EPERM run: socket was not blocked: %s", out)
+        return -1
+
+    out = run_with_errno_ret(13)
+    if out is None or 'Permission denied' not in out:
+        logger.info("EACCES run: stale filter served from the cache: %s", out)
+        return -1
+
+    return 0
+
+
 def test_seccomp_multiple_syscalls():
     """Test seccomp with multiple syscalls in one rule."""
     conf = base_config()
@@ -714,6 +761,7 @@ all_tests = {
     "seccomp-syscall-args": test_seccomp_syscall_args,
     "seccomp-more-than-six-syscall-args": test_seccomp_more_than_six_syscall_args,
     "seccomp-args-mixed-indices": test_seccomp_args_mixed_indices,
+    "seccomp-cache-errno-ret": test_seccomp_cache_errno_ret,
     "seccomp-multiple-syscalls": test_seccomp_multiple_syscalls,
     "seccomp-errno-default": test_seccomp_errno_default,
     "seccomp-comparison-ops": test_seccomp_comparison_ops,
