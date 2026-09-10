@@ -920,7 +920,9 @@ libcrun_generate_seccomp (struct libcrun_seccomp_gen_ctx_s *gen_ctx, libcrun_err
                       arg_cmp[k].datum_b = seccomp->syscalls[i]->args[k]->value_two;
                     }
 
-                  ret = seccomp_rule_add_array (ctx, action, syscall, args_len, arg_cmp);
+                  /* An empty "args" array means the rule is unconditional.  Do not
+                     hand over the uninitialized buffer for it.  */
+                  ret = seccomp_rule_add_array (ctx, action, syscall, args_len, args_len ? arg_cmp : NULL);
                   if (UNLIKELY (ret < 0))
                     return crun_make_error (err, -ret, "seccomp_rule_add_array");
                 }
