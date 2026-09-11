@@ -115,6 +115,9 @@
 #define ALL_PROPAGATIONS_NO_REC (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE)
 #define ALL_PROPAGATIONS (MS_REC | ALL_PROPAGATIONS_NO_REC)
 
+/* The per-mount flags a remount clears unless they are explicitly set.  */
+#define REMOUNT_CLEAR_FLAGS (MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_NOSYMFOLLOW)
+
 struct remount_s
 {
   struct remount_s *next;
@@ -343,8 +346,23 @@ do_mount_setattr (bool recursive, const char *target, int targetfd, uint64_t cle
   attr.attr_set = ms_flags_to_mount_attr (set & (~ALL_PROPAGATIONS));
   attr.attr_clr = ms_flags_to_mount_attr (clear & (~ALL_PROPAGATIONS));
 
-  if (attr.attr_set & MOUNT_ATTR__ATIME)
-    attr.attr_clr |= MOUNT_ATTR__ATIME;
+  /* Like mount(2) does, if any atime flag is set, set all the atime ones
+     anew: relatime is the default, noatime and strictatime override it
+     (strictatime wins), and nodiratime is independent.  Otherwise, the
+     atime flags of the mount are kept.  */
+  if (set & (MS_NOATIME | MS_NODIRATIME | MS_RELATIME | MS_STRICTATIME))
+    {
+      attr.attr_set &= ~(MOUNT_ATTR__ATIME | MOUNT_ATTR_NODIRATIME);
+      if (set & MS_STRICTATIME)
+        attr.attr_set |= MOUNT_ATTR_STRICTATIME;
+      else if (set & MS_NOATIME)
+        attr.attr_set |= MOUNT_ATTR_NOATIME;
+      else
+        attr.attr_set |= MOUNT_ATTR_RELATIME;
+      if (set & MS_NODIRATIME)
+        attr.attr_set |= MOUNT_ATTR_NODIRATIME;
+      attr.attr_clr |= MOUNT_ATTR__ATIME | MOUNT_ATTR_NODIRATIME;
+    }
 
   ret = syscall_mount_setattr (targetfd, "", (recursive ? AT_RECURSIVE : 0) | AT_EMPTY_PATH, &attr);
   if (UNLIKELY (ret < 0))
@@ -779,6 +797,28 @@ get_mount_flags (const char *name, int current_flags, int *found, unsigned long 
   return current_flags | prop->flags;
 }
 
+/* Whether any of the mount options sets or clears a mount flag, other
+   than MS_BIND, MS_REC and the propagation ones.  */
+static bool
+has_mount_flag_options (runtime_spec_schema_defs_mount *mount)
+{
+  size_t i;
+
+  for (i = 0; i < mount->options_len; i++)
+    {
+      const struct propagation_flags_s *prop;
+
+      if (mount->options[i] == NULL)
+        continue;
+
+      prop = libcrun_str2mount_flags (mount->options[i]);
+      if (prop && (prop->flags & ~(MS_BIND | ALL_PROPAGATIONS)))
+        return true;
+    }
+
+  return false;
+}
+
 static unsigned long
 get_mount_flags_or_option (const char *name, int current_flags, unsigned long *extra_flags, char **option, uint64_t *rec_clear, uint64_t *rec_set)
 {
@@ -863,7 +903,7 @@ do_remount (int targetfd, const char *target, unsigned long flags, const char *d
   if (targetfd >= 0)
     {
       unsigned long set_flags = flags & ~(MS_REMOUNT | MS_BIND);
-      unsigned long clear_flags = (MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC) & ~set_flags;
+      unsigned long clear_flags = REMOUNT_CLEAR_FLAGS & ~set_flags;
       ret = do_mount_setattr (false, target, targetfd, clear_flags, flags & ~MS_REMOUNT, err);
       if (LIKELY (ret == 0))
         return 0;
@@ -921,7 +961,11 @@ finalize_mounts (libcrun_container_t *container, libcrun_error_t *err)
       /* Try mount_setattr() first to avoid the statfs+retry fallback.  */
       if (r->targetfd >= 0 && (r->flags & MS_RDONLY))
         {
-          ret = do_mount_setattr (false, r->target, r->targetfd, 0, r->flags & ~MS_REMOUNT, err);
+          /* Clear the flags which are not set, like do_remount does.  */
+          unsigned long set_flags = r->flags & ~(MS_REMOUNT | MS_BIND);
+          unsigned long clear_flags = REMOUNT_CLEAR_FLAGS & ~set_flags;
+
+          ret = do_mount_setattr (false, r->target, r->targetfd, clear_flags, r->flags & ~MS_REMOUNT, err);
           if (LIKELY (ret == 0))
             {
               free_remount (r);
@@ -2955,7 +2999,11 @@ process_single_mount (libcrun_container_t *container, const char *rootfs,
       if (LIKELY (ret == 0))
         {
           unsigned long remaining_flags = flags & ~MS_BIND;
-          if (remaining_flags)
+
+          /* A remount is needed not only to set some flags, but also to
+             clear the ones set on the source (e.g. "bind,dev" on a nodev
+             source), in which case remaining_flags might be empty.  */
+          if (remaining_flags || has_mount_flag_options (mount))
             {
               ret = do_mount (container, NULL, source_mountfd, target, NULL, remaining_flags, data, LABEL_NONE, err);
               if (UNLIKELY (ret < 0))

@@ -911,6 +911,65 @@ def test_bind_mount_file_nofollow():
                 logger.info("error %s", e)
     return 0
 
+def test_bind_mount_flags():
+    """Check the flags of a bind mount with options are exactly the requested ones.
+
+    The flags of the source not requested (explicitly or not) must be cleared.
+    """
+    if is_rootless():
+        return (77, "requires root privileges")
+    source_dir = os.path.join(get_tests_root(), "test-bind-mount-flags")
+    os.makedirs(source_dir)
+    mounted = False
+    try:
+        if subprocess.call(["mount", "-t", "tmpfs", "tmpfs", source_dir]) != 0:
+            return (77, "cannot mount tmpfs")
+        mounted = True
+
+        # (source flags, bind mount options, flags which must be set, flags which must be cleared)
+        cases = [
+            ("ro,nosuid,nodev,noexec", ["bind", "dev", "suid", "exec"], ["rw"], ["ro", "nosuid", "nodev", "noexec"]),
+            ("ro,nosuid,nodev,noexec", ["bind", "ro"], ["ro"], ["nosuid", "nodev", "noexec"]),
+            ("ro,nosuid,nodev,noexec", ["bind", "nosuid"], ["rw", "nosuid"], ["ro", "nodev", "noexec"]),
+            # Setting an atime flag resets the others, like mount(2) does.
+            ("rw,noatime", ["bind", "relatime"], ["relatime"], ["noatime"]),
+            ("rw,noatime", ["bind", "nodiratime"], ["nodiratime", "relatime"], ["noatime"]),
+        ]
+        for source_flags, options, must_set, must_clear in cases:
+            # Set the per-mount flags only, so they can be cleared by a bind mount.
+            subprocess.check_call(["umount", source_dir])
+            subprocess.check_call(["mount", "-t", "tmpfs", "tmpfs", source_dir])
+            subprocess.check_call(["mount", "--bind", "-o", "remount," + source_flags, source_dir])
+
+            conf = base_config()
+            add_all_namespaces(conf)
+            conf['process']['args'] = ['/init', 'cat', '/proc/self/mounts']
+            conf['mounts'].append({"destination": "/foo", "type": "bind", "source": source_dir, "options": options})
+            out, _ = run_and_get_output(conf, hide_stderr=True)
+            flags = None
+            for line in out.split("\n"):
+                fields = line.split()
+                if len(fields) > 3 and fields[1] == "/foo":
+                    flags = fields[3].split(",")
+            if flags is None:
+                logger.info("bind mount flags test: /foo not found in %s", out)
+                return -1
+            for f in must_set:
+                if f not in flags:
+                    logger.info("bind mount flags test: options %s: %s not set in %s", options, f, flags)
+                    return -1
+            for f in must_clear:
+                if f in flags:
+                    logger.info("bind mount flags test: options %s: %s not cleared in %s", options, f, flags)
+                    return -1
+    finally:
+        if mounted:
+            subprocess.call(["umount", source_dir])
+        shutil.rmtree(source_dir)
+
+    return 0
+
+
 def test_idmapped_mounts_without_userns():
     if is_rootless():
         return (77, "requires root privileges")
@@ -1462,6 +1521,7 @@ all_tests = {
     "mount-userns-bind-mount" : test_userns_bind_mount,
     "mount-idmapped-mounts" : test_idmapped_mounts,
     "mount-idmapped-mounts-without-userns" : test_idmapped_mounts_without_userns,
+    "mount-bind-flags" : test_bind_mount_flags,
     "mount-idmapped-mounts-symlink" : test_userns_bind_mount_symlink,
     "mount-linux-readonly-should-inherit-flags": test_mount_readonly_should_inherit_options_from_parent,
     "proc-linux-readonly-should-inherit-flags": test_proc_readonly_should_inherit_options_from_parent,
