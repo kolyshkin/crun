@@ -346,8 +346,23 @@ do_mount_setattr (bool recursive, const char *target, int targetfd, uint64_t cle
   attr.attr_set = ms_flags_to_mount_attr (set & (~ALL_PROPAGATIONS));
   attr.attr_clr = ms_flags_to_mount_attr (clear & (~ALL_PROPAGATIONS));
 
-  if (attr.attr_set & MOUNT_ATTR__ATIME)
-    attr.attr_clr |= MOUNT_ATTR__ATIME;
+  /* Like mount(2) does, if any atime flag is set, set all the atime ones
+     anew: relatime is the default, noatime and strictatime override it
+     (strictatime wins), and nodiratime is independent.  Otherwise, the
+     atime flags of the mount are kept.  */
+  if (set & (MS_NOATIME | MS_NODIRATIME | MS_RELATIME | MS_STRICTATIME))
+    {
+      attr.attr_set &= ~(MOUNT_ATTR__ATIME | MOUNT_ATTR_NODIRATIME);
+      if (set & MS_STRICTATIME)
+        attr.attr_set |= MOUNT_ATTR_STRICTATIME;
+      else if (set & MS_NOATIME)
+        attr.attr_set |= MOUNT_ATTR_NOATIME;
+      else
+        attr.attr_set |= MOUNT_ATTR_RELATIME;
+      if (set & MS_NODIRATIME)
+        attr.attr_set |= MOUNT_ATTR_NODIRATIME;
+      attr.attr_clr |= MOUNT_ATTR__ATIME | MOUNT_ATTR_NODIRATIME;
+    }
 
   ret = syscall_mount_setattr (targetfd, "", (recursive ? AT_RECURSIVE : 0) | AT_EMPTY_PATH, &attr);
   if (UNLIKELY (ret < 0))

@@ -925,16 +925,22 @@ def test_bind_mount_flags():
         if subprocess.call(["mount", "-t", "tmpfs", "tmpfs", source_dir]) != 0:
             return (77, "cannot mount tmpfs")
         mounted = True
-        # Set the per-mount flags only, so they can be cleared by a bind mount.
-        subprocess.check_call(["mount", "--bind", "-o", "remount,ro,nosuid,nodev,noexec", source_dir])
 
-        # (bind mount options, flags which must be set, flags which must be cleared)
+        # (source flags, bind mount options, flags which must be set, flags which must be cleared)
         cases = [
-            (["bind", "dev", "suid", "exec"], ["rw"], ["ro", "nosuid", "nodev", "noexec"]),
-            (["bind", "ro"], ["ro"], ["nosuid", "nodev", "noexec"]),
-            (["bind", "nosuid"], ["rw", "nosuid"], ["ro", "nodev", "noexec"]),
+            ("ro,nosuid,nodev,noexec", ["bind", "dev", "suid", "exec"], ["rw"], ["ro", "nosuid", "nodev", "noexec"]),
+            ("ro,nosuid,nodev,noexec", ["bind", "ro"], ["ro"], ["nosuid", "nodev", "noexec"]),
+            ("ro,nosuid,nodev,noexec", ["bind", "nosuid"], ["rw", "nosuid"], ["ro", "nodev", "noexec"]),
+            # Setting an atime flag resets the others, like mount(2) does.
+            ("rw,noatime", ["bind", "relatime"], ["relatime"], ["noatime"]),
+            ("rw,noatime", ["bind", "nodiratime"], ["nodiratime", "relatime"], ["noatime"]),
         ]
-        for options, must_set, must_clear in cases:
+        for source_flags, options, must_set, must_clear in cases:
+            # Set the per-mount flags only, so they can be cleared by a bind mount.
+            subprocess.check_call(["umount", source_dir])
+            subprocess.check_call(["mount", "-t", "tmpfs", "tmpfs", source_dir])
+            subprocess.check_call(["mount", "--bind", "-o", "remount," + source_flags, source_dir])
+
             conf = base_config()
             add_all_namespaces(conf)
             conf['process']['args'] = ['/init', 'cat', '/proc/self/mounts']
