@@ -42,4 +42,6 @@ int destroy_cgroup_path (const char *path, int mode, libcrun_error_t *err);
 
 int get_cgroup_dirfd_path (int dirfd, char **path, libcrun_error_t *err);
 
+int libcrun_cgroup_ensure_not_frozen (const char *cgroup_path, libcrun_error_t *err);
+
 #endif

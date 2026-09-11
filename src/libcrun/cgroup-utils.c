@@ -741,6 +741,53 @@ libcrun_cgroup_pause_unpause_path (const char *cgroup_path, const bool pause, li
   return libcrun_cgroup_pause_unpause_with_mode (cgroup_path, cgroup_mode, pause, err);
 }
 
+/* Fail if the cgroup at CGROUP_PATH exists and is frozen: a process in a
+   frozen cgroup cannot make any progress, so the container creation would
+   hang forever.  */
+int
+libcrun_cgroup_ensure_not_frozen (const char *cgroup_path, libcrun_error_t *err)
+{
+  cleanup_free char *content = NULL;
+  cleanup_free char *path = NULL;
+  const char *frozen;
+  int cgroup_mode;
+  int ret;
+
+  cgroup_mode = libcrun_get_cgroup_mode (err);
+  if (UNLIKELY (cgroup_mode < 0))
+    return cgroup_mode;
+
+  if (cgroup_mode == CGROUP_MODE_UNIFIED)
+    {
+      frozen = "1";
+      ret = append_paths (&path, err, CGROUP_ROOT, cgroup_path, "cgroup.freeze", NULL);
+    }
+  else
+    {
+      frozen = "FROZEN";
+      ret = append_paths (&path, err, CGROUP_ROOT "/freezer", cgroup_path, "freezer.state", NULL);
+    }
+  if (UNLIKELY (ret < 0))
+    return ret;
+
+  ret = read_all_file (path, &content, NULL, err);
+  if (UNLIKELY (ret < 0))
+    {
+      /* Either the cgroup does not exist yet, or there is no freezer.  */
+      if (crun_error_get_errno (err) == ENOENT)
+        {
+          crun_error_release (err);
+          return 0;
+        }
+      return ret;
+    }
+
+  if (strstr (content, frozen))
+    return crun_make_error (err, 0, "container's cgroup unexpectedly frozen");
+
+  return 0;
+}
+
 int
 cgroup_killall_path (const char *path, int signal, libcrun_error_t *err)
 {

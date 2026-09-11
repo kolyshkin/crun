@@ -2037,6 +2037,7 @@ libcrun_cgroup_enter_systemd (struct libcrun_cgroup_args *args,
 {
   runtime_spec_schema_config_linux_resources *resources = args->resources;
   const char *cgroup_path = args->cgroup_path;
+  cleanup_free char *scope_path = NULL;
   cleanup_free char *scope = NULL;
   cleanup_free char *path = NULL;
   cleanup_free char *slice = NULL;
@@ -2085,25 +2086,31 @@ libcrun_cgroup_enter_systemd (struct libcrun_cgroup_args *args,
   if (UNLIKELY (ret < 0))
     return ret;
 
-  /* Verify that systemd has actually installed the eBPF device filter if one was requested. */
+  /* Remove the suffix that was added by systemd_finalize.  */
+  if (is_empty_string (suffix))
+    scope_path = xstrdup (path);
+  else
+    {
+      size_t path_len = strlen (path);
+      size_t suffix_len = strlen (suffix);
+
+      scope_path = strndup (path, path_len - suffix_len - 1);
+      if (UNLIKELY (scope_path == NULL))
+        OOM ();
+    }
+
+  /* The cgroup path is chosen by systemd, so it cannot be checked before
+     the container process is moved there.  Check the scope, as the
+     sub-cgroup is created by us, and would appear not frozen even if
+     the scope is.  */
+  ret = libcrun_cgroup_ensure_not_frozen (scope_path, err);
+  if (UNLIKELY (ret < 0))
+    return ret;
+
+  /* Verify that systemd has actually installed the eBPF device filter if one was requested.
+     eBPF programs are attached to the systemd scope, not the subgroup.  */
   if (out->bpf_dev_set)
     {
-      cleanup_free char *scope_path = NULL;
-
-      /* eBPF programs are attached to the systemd scope, not the subgroup.
-         Remove the suffix that was added by systemd_finalize. */
-      if (is_empty_string (suffix))
-        scope_path = xstrdup (path);
-      else
-        {
-          size_t path_len = strlen (path);
-          size_t suffix_len = strlen (suffix);
-
-          scope_path = strndup (path, path_len - suffix_len - 1);
-          if (UNLIKELY (scope_path == NULL))
-            OOM ();
-        }
-
       ret = verify_ebpf_device_filter_installed (scope_path, err);
       if (UNLIKELY (ret < 0))
         return ret;
