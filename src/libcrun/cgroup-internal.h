@@ -57,6 +57,9 @@ struct libcrun_cgroup_manager
   int (*destroy_cgroup) (struct libcrun_cgroup_status *cgroup_status, libcrun_error_t *err);
   /* Additional resources configuration specific to this manager.  */
   int (*update_resources) (struct libcrun_cgroup_status *cgroup_status, const char *state_root, runtime_spec_schema_config_linux_resources *resources, libcrun_error_t *err);
+  /* Move PID to the cgroup PATH (the container cgroup or its sub-cgroup) by
+     other means than writing to cgroup.procs.  Optional.  */
+  int (*attach_process) (struct libcrun_cgroup_status *cgroup_status, const char *path, pid_t pid, libcrun_error_t *err);
 };
 
 int move_process_to_cgroup (pid_t pid, const char *subsystem, const char *path, libcrun_error_t *err);

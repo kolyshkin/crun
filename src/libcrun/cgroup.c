@@ -184,6 +184,46 @@ libcrun_cgroup_is_container_paused (struct libcrun_cgroup_status *status, bool *
 }
 
 int
+libcrun_cgroup_join_process (struct libcrun_cgroup_status *status, const char *path, pid_t pid, pid_t init_pid,
+                             libcrun_error_t *err)
+{
+  struct libcrun_cgroup_manager *cgroup_manager;
+  libcrun_error_t tmp_err = NULL;
+  int errno_;
+  int ret;
+
+  ret = libcrun_move_process_to_cgroup (pid, init_pid, path, false, err);
+  if (LIKELY (ret >= 0))
+    return ret;
+
+  /* Moving a process requires write access to cgroup.procs of the common
+     ancestor of the source and the destination cgroups, which the caller
+     may lack.  See if the cgroup manager can do it instead.  */
+  errno_ = crun_error_get_errno (err);
+  if (errno_ != EACCES && errno_ != EPERM)
+    return ret;
+
+  if (get_cgroup_manager (status->manager, &cgroup_manager, &tmp_err) < 0)
+    {
+      crun_error_release (&tmp_err);
+      return ret;
+    }
+  if (cgroup_manager->attach_process == NULL)
+    return ret;
+
+  if (UNLIKELY (cgroup_manager->attach_process (status, path, pid, &tmp_err) < 0))
+    {
+      /* Report the original error, as it is more relevant.  */
+      libcrun_debug ("Cannot attach pid %d to cgroup `%s`: %s", pid, path, tmp_err->msg);
+      crun_error_release (&tmp_err);
+      return ret;
+    }
+
+  crun_error_release (err);
+  return 0;
+}
+
+int
 libcrun_cgroup_read_pids (struct libcrun_cgroup_status *status, bool recurse, pid_t **pids, libcrun_error_t *err)
 {
   return libcrun_cgroup_read_pids_from_path (status->path, recurse, pids, err);
