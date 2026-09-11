@@ -258,6 +258,111 @@ def test_cr_restore_foreground():
     return 0
 
 
+def _find_zombies(ppid):
+    zombies = []
+    for entry in os.listdir('/proc'):
+        if not entry.isdigit():
+            continue
+        try:
+            with open('/proc/%s/stat' % entry) as f:
+                fields = f.read().rsplit(')', 1)[1].split()
+        except OSError:
+            continue
+        if fields[0] == 'Z' and int(fields[1]) == ppid:
+            zombies.append(int(entry))
+    return zombies
+
+
+def _make_orphan(bundle, pid):
+    # Tell init to create the orphan, and wait until it reports it has.
+    open(os.path.join(bundle, 'rootfs', 'orphan-now'), "w").close()
+    for _ in range(100):
+        with open('/proc/%d/comm' % pid) as f:
+            if f.read().strip() == 'orphan-made':
+                return 0
+        time.sleep(0.1)
+    logger.info("_make_orphan: init %d did not create the orphan", pid)
+    return -1
+
+
+# A foreground restore must not leave crun a subreaper: it only waits for the
+# container init, so any other process of the container it inherits once it is
+# orphaned would stay a zombie.  Use a container which shares the PID namespace
+# of the host, as otherwise the container init is the one to inherit them.
+def test_cr_restore_foreground_orphan():
+    if r := _check_cr_requirements():
+        return r
+
+    cid = None
+    cr_dir = os.path.join(get_tests_root(), 'checkpoint-foreground-orphan')
+    work_dir = os.path.join(get_tests_root(), 'work-dir')
+    conf = base_config()
+    conf['process']['args'] = ['/init', 'orphan-on-file']
+    add_all_namespaces(conf, pidns=False)
+    try:
+        _, cid = run_and_get_output(
+            conf,
+            all_dev_null=True,
+            use_popen=True,
+            detach=True
+        )
+
+        if _wait_running(cid) == 0:
+            logger.info("test_cr_restore_foreground_orphan: the container did not start")
+            return -1
+
+        run_crun_command([
+            "checkpoint",
+            "--image-path=%s" % cr_dir,
+            "--work-path=%s" % work_dir,
+            cid
+        ])
+
+        bundle = os.path.join(get_tests_root(), cid.split('-')[1])
+        crun = subprocess.Popen([
+            get_crun_path(),
+            "--root", get_tests_root_status(),
+            "restore",
+            "--image-path=%s" % cr_dir,
+            "--work-path=%s" % work_dir,
+            "--bundle=%s" % bundle,
+            cid
+        ], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE, close_fds=False)
+
+        pid = _wait_running(cid)
+        if pid == 0:
+            crun.kill()
+            logger.info("test_cr_restore_foreground_orphan: the container was not restored: %s",
+                        crun.stderr.read().decode())
+            return -1
+
+        if _make_orphan(bundle, pid) < 0:
+            crun.kill()
+            return -1
+
+        # Give the orphan time to exit, and its new parent time to reap it.
+        time.sleep(1)
+        zombies = _find_zombies(crun.pid)
+        if zombies:
+            logger.info("test_cr_restore_foreground_orphan: crun %d has zombie children: %s",
+                        crun.pid, zombies)
+            crun.kill()
+            return -1
+
+        run_crun_command(["kill", cid, "KILL"])
+        try:
+            crun.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            crun.kill()
+            logger.info("test_cr_restore_foreground_orphan: crun did not exit with the container")
+            return -1
+    finally:
+        if cid is not None:
+            run_crun_command(["delete", "-f", cid])
+    return 0
+
+
 def test_cr_pre_dump():
     if r := _check_cr_requirements(min_criu_version=31700):
         return r
@@ -513,6 +618,7 @@ all_tests = {
     "checkpoint-restore-masked-paths": test_cr_masked_paths,
     "checkpoint-restore-ext-ns": test_cr_with_ext_ns,
     "checkpoint-restore-foreground": test_cr_restore_foreground,
+    "checkpoint-restore-foreground-orphan": test_cr_restore_foreground_orphan,
     "checkpoint-restore-pre-dump": test_cr_pre_dump,
     "checkpoint-restore-with-runc-config": test_cr_with_runc_config,
     "checkpoint-restore-with-crun-config": test_cr_with_crun_config,

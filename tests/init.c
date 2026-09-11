@@ -805,6 +805,39 @@ main (int argc, char **argv)
     {
       do_pause ();
     }
+  if (strcmp (argv[1], "orphan-on-file") == 0)
+    {
+      pid_t pid;
+
+      /* Wait for /orphan-now to show up, then create a process which is
+         orphaned right away and exits shortly after, so that whoever
+         inherits it has to reap it.  Report that it is done by changing the
+         process name.  A file is used rather than a signal, as a signal sent
+         before we are ready would terminate us.  */
+      while (access ("/orphan-now", F_OK) < 0)
+        usleep (50000);
+
+      pid = fork ();
+      if (pid < 0)
+        error (EXIT_FAILURE, errno, "fork");
+      if (pid == 0)
+        {
+          pid_t orphan = fork ();
+          if (orphan < 0)
+            error (EXIT_FAILURE, errno, "fork");
+          if (orphan == 0)
+            {
+              usleep (200000);
+              _exit (EXIT_SUCCESS);
+            }
+          _exit (EXIT_SUCCESS);
+        }
+      if (waitpid (pid, NULL, 0) < 0)
+        error (EXIT_FAILURE, errno, "waitpid");
+      if (prctl (PR_SET_NAME, "orphan-made") < 0)
+        error (EXIT_FAILURE, errno, "prctl PR_SET_NAME");
+      do_pause ();
+    }
   if (strcmp (argv[1], "memhog") == 0)
     {
       if (argc < 3)
