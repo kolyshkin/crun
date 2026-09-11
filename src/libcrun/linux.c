@@ -115,6 +115,9 @@
 #define ALL_PROPAGATIONS_NO_REC (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE)
 #define ALL_PROPAGATIONS (MS_REC | ALL_PROPAGATIONS_NO_REC)
 
+/* The per-mount flags a remount clears unless they are explicitly set.  */
+#define REMOUNT_CLEAR_FLAGS (MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC)
+
 struct remount_s
 {
   struct remount_s *next;
@@ -863,7 +866,7 @@ do_remount (int targetfd, const char *target, unsigned long flags, const char *d
   if (targetfd >= 0)
     {
       unsigned long set_flags = flags & ~(MS_REMOUNT | MS_BIND);
-      unsigned long clear_flags = (MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC) & ~set_flags;
+      unsigned long clear_flags = REMOUNT_CLEAR_FLAGS & ~set_flags;
       ret = do_mount_setattr (false, target, targetfd, clear_flags, flags & ~MS_REMOUNT, err);
       if (LIKELY (ret == 0))
         return 0;
@@ -921,7 +924,11 @@ finalize_mounts (libcrun_container_t *container, libcrun_error_t *err)
       /* Try mount_setattr() first to avoid the statfs+retry fallback.  */
       if (r->targetfd >= 0 && (r->flags & MS_RDONLY))
         {
-          ret = do_mount_setattr (false, r->target, r->targetfd, 0, r->flags & ~MS_REMOUNT, err);
+          /* Clear the flags which are not set, like do_remount does.  */
+          unsigned long set_flags = r->flags & ~(MS_REMOUNT | MS_BIND);
+          unsigned long clear_flags = REMOUNT_CLEAR_FLAGS & ~set_flags;
+
+          ret = do_mount_setattr (false, r->target, r->targetfd, clear_flags, r->flags & ~MS_REMOUNT, err);
           if (LIKELY (ret == 0))
             {
               free_remount (r);
