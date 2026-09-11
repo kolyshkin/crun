@@ -399,20 +399,31 @@ libcrun_cgroup_enter (struct libcrun_cgroup_args *args, struct libcrun_cgroup_st
         {
           ret = chown_cgroups (status->path, root_uid, root_gid, err);
           if (UNLIKELY (ret < 0))
-            return ret;
+            goto fail_destroy;
         }
 
       if (args->resources)
         {
           ret = update_cgroup_resources (status->path, args->state_root, args->resources, ! status->bpf_dev_set, err);
           if (UNLIKELY (ret < 0))
-            return ret;
+            goto fail_destroy;
         }
     }
 success:
   *out = status;
   status = NULL;
   return 0;
+
+fail_destroy:
+  /* The cgroup is created, but the caller does not get its status, so it
+     cannot destroy it.  Do it here, so it is not left behind.  */
+  {
+    libcrun_error_t tmp_err = NULL;
+
+    if (UNLIKELY (cgroup_manager->destroy_cgroup (status, &tmp_err) < 0))
+      crun_error_release (&tmp_err);
+  }
+  return ret;
 }
 
 int
