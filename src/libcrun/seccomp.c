@@ -873,7 +873,14 @@ libcrun_generate_seccomp (struct libcrun_seccomp_gen_ctx_s *gen_ctx, libcrun_err
                     multiple_args = true;
                 }
 
-              /* If multiple rules refer to the same argument, treat the rules are in OR.  */
+              /* If multiple rules refer to the same argument, treat the rules are in OR.
+
+                 Note this is not limited to the repeated argument: once any index
+                 is repeated, every condition of the entry becomes a rule of its
+                 own, so conditions on distinct indices stop being ANDed together.
+                 The OCI runtime specification does not define how conditions
+                 combine, and this matches what runc does; see
+                 https://github.com/opencontainers/runc/issues/2735.  */
               if (multiple_args)
                 {
                   size_t r;
