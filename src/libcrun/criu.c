@@ -946,6 +946,20 @@ prepare_restore_mounts (runtime_spec_schema_config_schema *def, char *root, libc
   return 0;
 }
 
+/* Move the current process back to CGROUPS, as read from /proc/self/cgroup.
+   A failure is not fatal, so only warn about it.  */
+static void
+move_back_to_cgroups (const char *cgroups)
+{
+  libcrun_error_t tmp_err = NULL;
+
+  if (UNLIKELY (libcrun_move_self_to_cgroups (cgroups, &tmp_err) < 0))
+    {
+      libcrun_warning ("cannot move back to the original cgroup: %s", tmp_err->msg);
+      crun_error_release (&tmp_err);
+    }
+}
+
 int
 libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcrun_container_t *container,
                                       libcrun_checkpoint_restore_t *cr_options, libcrun_error_t *err)
@@ -957,6 +971,7 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
   cleanup_close int image_fd = -1;
   cleanup_free char *root = NULL;
   cleanup_free char *bundle_cleanup = NULL;
+  cleanup_free char *own_cgroups = NULL;
   cleanup_close int work_fd = -1;
   int ret_out;
   size_t i;
@@ -1276,10 +1291,34 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
       goto out_umount;
     }
 
+  /* Like runc does, put CRIU into the container cgroup for the time of
+   * restore, so the restored tasks are created there. It is necessary in
+   * the "ignore" mode, where CRIU does not deal with cgroups at all, and
+   * does not hurt otherwise. As CRIU is our child, do it by moving
+   * ourselves there, and move back once the restore is done. */
+  if (! is_empty_string (status->cgroup_path))
+    {
+      ret = read_all_file (PROC_SELF_CGROUP, &own_cgroups, NULL, err);
+      if (UNLIKELY (ret < 0))
+        goto out_umount;
+
+      ret = libcrun_move_process_to_cgroup (0, 0, status->cgroup_path, false, err);
+      if (UNLIKELY (ret < 0))
+        {
+          /* Some of the cgroups might have been joined already.  */
+          move_back_to_cgroups (own_cgroups);
+          goto out_umount;
+        }
+    }
+
   /* criu_restore() returns the PID of the process of the restored process
    * tree. This PID will not be the same as status->pid if the container is
    * running in a PID namespace. But it will always be > 0. */
   ret = libcriu_wrapper->criu_restore_child ();
+
+  if (own_cgroups)
+    move_back_to_cgroups (own_cgroups);
+
   if (UNLIKELY (ret <= 0))
     {
       show_criu_log (cr_options->work_path, CRIU_RESTORE_LOG_FILE);
