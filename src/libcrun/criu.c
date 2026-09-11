@@ -1353,6 +1353,14 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
         }
 
       ret = criu_restore_child_in_cgroup (status->cgroup_path, &criu_ret, err);
+
+      /* The restored init has been reparented to us by now, so stop being a
+         subreaper: otherwise we would also inherit the other processes of the
+         container once they are orphaned, and never reap them, as we only wait
+         for the init.  A failure here is not fatal, so only warn about it.  */
+      if (! cr_options->detach && UNLIKELY (prctl (PR_SET_CHILD_SUBREAPER, 0, 0, 0, 0) < 0))
+        libcrun_warning ("cannot stop being a child subreaper: %s", strerror (errno));
+
       if (UNLIKELY (ret < 0))
         goto out_umount;
 
