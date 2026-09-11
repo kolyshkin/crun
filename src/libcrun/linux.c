@@ -4038,6 +4038,11 @@ libcrun_do_pivot_root (libcrun_container_t *container, bool no_pivot, char **roo
   return 0;
 }
 
+/* Device number of the null device, as documented in
+ * Documentation/admin-guide/devices.txt.  */
+#define DEV_NULL_MAJOR 1
+#define DEV_NULL_MINOR 3
+
 /* If one of stdin, stdout, stderr are pointing to /dev/null on
  * the outside of the container, this moves it to /dev/null inside
  * of the container. This needs to run after pivot/chroot-ing. */
@@ -4050,18 +4055,21 @@ libcrun_reopen_dev_null (libcrun_error_t *err)
   int i;
 
   /* Open /dev/null inside of the container. */
-  fd = open ("/dev/null", O_RDWR | O_CLOEXEC);
+  fd = open ("/dev/null", O_RDWR | O_CLOEXEC | O_NOFOLLOW);
   if (UNLIKELY (fd == -1))
     return crun_make_error (err, errno, "open `/dev/null`");
 
   if (UNLIKELY (fstat (fd, &dev_null) == -1))
     return crun_make_error (err, errno, "stat `/dev/null`");
 
+  if (UNLIKELY (! S_ISCHR (dev_null.st_mode) || dev_null.st_rdev != makedev (DEV_NULL_MAJOR, DEV_NULL_MINOR)))
+    return crun_make_error (err, 0, "`/dev/null` is not the null device");
+
   for (i = 0; i <= 2; i++)
     {
       if (UNLIKELY (fstat (i, &statbuf) == -1))
         return crun_make_error (err, errno, "stat fd `%d`", i);
-      if (statbuf.st_rdev == dev_null.st_rdev)
+      if (S_ISCHR (statbuf.st_mode) && statbuf.st_rdev == dev_null.st_rdev)
         {
           /* This FD is pointing to /dev/null. Point it to /dev/null inside
            * of the container. */
