@@ -116,7 +116,7 @@
 #define ALL_PROPAGATIONS (MS_REC | ALL_PROPAGATIONS_NO_REC)
 
 /* The per-mount flags a remount clears unless they are explicitly set.  */
-#define REMOUNT_CLEAR_FLAGS (MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC)
+#define REMOUNT_CLEAR_FLAGS (MS_RDONLY | MS_NOSUID | MS_NODEV | MS_NOEXEC | MS_NOSYMFOLLOW)
 
 struct remount_s
 {
