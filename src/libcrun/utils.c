@@ -201,7 +201,7 @@ get_file_type (mode_t *mode, bool nofollow, const char *path)
 int
 create_file_if_missing_at (int dirfd, const char *file, mode_t mode, libcrun_error_t *err)
 {
-  cleanup_close int fd_write = openat (dirfd, file, O_CLOEXEC | O_CREAT | O_WRONLY, mode);
+  cleanup_close int fd_write = openat (dirfd, file, O_CLOEXEC | O_CREAT | O_WRONLY | O_NOFOLLOW, mode);
   if (fd_write < 0)
     {
       int saved_errno = errno;
@@ -209,7 +209,7 @@ create_file_if_missing_at (int dirfd, const char *file, mode_t mode, libcrun_err
       int ret;
 
       /* On errors, check if the file already exists.  */
-      ret = get_file_type_at (dirfd, &tmp_mode, false, file);
+      ret = get_file_type_at (dirfd, &tmp_mode, true, file);
       if (ret == 0 && S_ISREG (tmp_mode))
         return 0;
 
