@@ -923,10 +923,6 @@ def test_idmapped_mounts_without_userns():
             f.write("")
         os.chown(target, 0, 0)
 
-        conf = base_config()
-        add_all_namespaces(conf, userns=False)
-        conf['process']['args'] = ['/init', 'owner', '/foo/file']
-
         mountMappings = [
             {
                 "containerID": 0,
@@ -935,18 +931,25 @@ def test_idmapped_mounts_without_userns():
             }
         ]
 
-        options = ["bind", "ro", "idmap"]
-        mount_opt = {"destination": "/foo", "type": "bind", "source": source_dir, "options": options}
-        mount_opt["uidMappings"] = mountMappings
-        mount_opt["gidMappings"] = mountMappings
+        # Test both an absolute and a relative (to the bundle, which is
+        # created in the tests root directory) source.
+        for source in [source_dir, os.path.join("..", os.path.basename(source_dir))]:
+            conf = base_config()
+            add_all_namespaces(conf, userns=False)
+            conf['process']['args'] = ['/init', 'owner', '/foo/file']
 
-        conf['mounts'].append(mount_opt)
-        out, _ = run_and_get_output(conf, hide_stderr=True)
+            options = ["bind", "ro", "idmap"]
+            mount_opt = {"destination": "/foo", "type": "bind", "source": source, "options": options}
+            mount_opt["uidMappings"] = mountMappings
+            mount_opt["gidMappings"] = mountMappings
 
-        if "1000:1000" not in out:
-            logger.info("idmap without userns test failed: expected '1000:1000' in output")
-            logger.info("actual output: %s", out)
-            return 1
+            conf['mounts'].append(mount_opt)
+            out, _ = run_and_get_output(conf, hide_stderr=True)
+
+            if "1000:1000" not in out:
+                logger.info("idmap without userns test failed (source %s): expected '1000:1000' in output", source)
+                logger.info("actual output: %s", out)
+                return 1
     finally:
         shutil.rmtree(source_dir)
 
