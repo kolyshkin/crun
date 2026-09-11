@@ -4395,8 +4395,11 @@ libcrun_container_restore (libcrun_context_t *context, const char *id, libcrun_c
         if (UNLIKELY (ret < 0))
           return ret;
 
-        /* Use the container first process PID to setup the cgroup.  */
+        /* Use the container first process PID to setup the cgroup.  The
+           restored processes are already in the cgroup, as CRIU was run
+           there, and the controllers were enabled by precreate_cgroup.  */
         cg.pid = status.pid;
+        cg.joined = true;
       }
     else
       {
