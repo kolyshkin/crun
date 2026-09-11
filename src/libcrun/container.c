@@ -3623,7 +3623,7 @@ libcrun_container_exec_with_options (libcrun_context_t *context, const char *id,
   }
 
   if (UNLIKELY (container_paused))
-    return crun_make_error (err, 0, "the container `%s` is paused", id);
+    return crun_make_error (err, 0, "cannot exec in a paused container `%s`", id);
 
   ret = libcrun_configure_handler (context->handler_manager,
                                    context,
