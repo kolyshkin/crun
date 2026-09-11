@@ -678,6 +678,18 @@ def test_exec_exit_code():
                 logger.info("test_exec_exit_code: expected exit code 42, got %d", e.returncode)
                 return -1
 
+        # Failures of exec itself use 255, to be told apart from the
+        # exit code of the executed process.
+        for args in [[cid, "/not.here"], ["no-such-container", "/init", "true"]]:
+            try:
+                run_crun_command_raw(["exec"] + args)
+                logger.info("test_exec_exit_code: expected exec %s to fail", args)
+                return -1
+            except subprocess.CalledProcessError as e:
+                if e.returncode != 255:
+                    logger.info("test_exec_exit_code: exec %s: expected exit code 255, got %d", args, e.returncode)
+                    return -1
+
         return 0
 
     except Exception as e:

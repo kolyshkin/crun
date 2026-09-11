@@ -53,6 +53,10 @@
 #include "mounts.h"
 #include "restore.h"
 
+/* crun exec exits with the exit code of the executed process, so use this
+   code for its own errors, to tell those apart (like runc and ssh do).  */
+#define EXIT_EXEC_FAILURE 255
+
 static struct crun_global_arguments arguments;
 
 static struct custom_handler_manager_s *handler_manager;
@@ -478,7 +482,14 @@ main (int argc, char **argv)
 
   ret = command->handler (&arguments, command_argc, command_argv, &err);
   if (ret && err)
-    libcrun_fail_with_error (err->status, "%s", err->msg);
+    {
+      if (command->value == COMMAND_EXEC)
+        {
+          libcrun_error (err->status, "%s", err->msg);
+          exit (EXIT_EXEC_FAILURE);
+        }
+      libcrun_fail_with_error (err->status, "%s", err->msg);
+    }
 
   return ret;
 }
