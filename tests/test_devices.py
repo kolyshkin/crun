@@ -439,6 +439,41 @@ def test_dev_null_symlink_not_reopened():
 
     return 0
 
+def test_dev_console_symlink_does_not_escape_rootfs():
+    escaped = os.path.join(get_tests_root(), "escaped-console")
+
+    conf = base_config()
+    add_all_namespaces(conf)
+    conf['process']['terminal'] = True
+    conf['process']['args'] = ['/init', 'true']
+    conf['mounts'] = [i for i in conf['mounts'] if not i['destination'].startswith("/dev")]
+    # a hook forces the deferred pivot_root, so the rootfs is still reached
+    # through the host file system when the devices are created.
+    conf['hooks'] = {"createRuntime": [{"path": "/bin/true"}]}
+
+    def prepare_rootfs(rootfs):
+        os.symlink(escaped, os.path.join(rootfs, "dev", "console"))
+
+    output = None
+    try:
+        run_and_get_output(conf, callback_prepare_rootfs=prepare_rootfs)
+    except Exception as e:
+        output = e.output.decode()
+
+    if os.path.lexists(escaped):
+        logger.error("`%s` was created outside the rootfs", escaped)
+        return -1
+
+    if output is None:
+        logger.error("the container was not refused")
+        return -1
+
+    if "create file `console`" not in output:
+        logger.error("the container failed for a different reason: %s", output)
+        return -1
+
+    return 0
+
 def test_dev_symlink_does_not_populate_outside_rootfs():
     if is_rootless():
         return (77, "requires root privileges")
@@ -579,6 +614,7 @@ all_tests = {
     "mknod-fifo-device": test_mknod_fifo_device,
     "mknod-char-device": test_mknod_char_device,
     "dev-null-symlink-not-reopened": test_dev_null_symlink_not_reopened,
+    "dev-console-symlink-does-not-escape-rootfs": test_dev_console_symlink_does_not_escape_rootfs,
     "dev-symlink-does-not-populate-outside-rootfs": test_dev_symlink_does_not_populate_outside_rootfs,
     "userns-precreated-devices-flags": test_userns_precreated_devices_flags,
     "allow-device-read-only": test_allow_device_read_only,
