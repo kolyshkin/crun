@@ -525,7 +525,8 @@ gen_error:
 
 static int
 do_hooks (runtime_spec_schema_config_schema *def, pid_t pid, const char *id, bool keep_going, const char *cwd,
-          const char *status, hook **hooks, size_t hooks_len, int out_fd, int err_fd, bool can_ignore_chdir_errors, libcrun_error_t *err)
+          const char *status, const char *name, hook **hooks, size_t hooks_len, int out_fd, int err_fd,
+          bool can_ignore_chdir_errors, libcrun_error_t *err)
 {
   size_t i, stdin_len;
   int r, ret;
@@ -598,10 +599,10 @@ do_hooks (runtime_spec_schema_config_schema *def, pid_t pid, const char *id, boo
       if (UNLIKELY (ret != 0))
         {
           if (keep_going)
-            libcrun_warning ("error executing hook `%s` (exit code: %d)", hooks[i]->path, ret);
+            libcrun_warning ("error running %s hook #%zu: `%s` (exit code: %d)", name, i, hooks[i]->path, ret);
           else
             {
-              libcrun_error (0, "error executing hook `%s` (exit code: %d)", hooks[i]->path, ret);
+              libcrun_error (0, "error running %s hook #%zu: `%s` (exit code: %d)", name, i, hooks[i]->path, ret);
               break;
             }
         }
@@ -1059,7 +1060,7 @@ container_init_setup (void *args, pid_t own_pid, char *notify_socket,
       int in_userns = check_running_in_user_namespace (&tmp_err);
       if (tmp_err)
         crun_error_release (&tmp_err);
-      ret = do_hooks (def, 0, container->context->id, false, NULL, "created", (hook **) def->hooks->create_container,
+      ret = do_hooks (def, 0, container->context->id, false, NULL, "created", "createContainer", (hook **) def->hooks->create_container,
                       def->hooks->create_container_len, entrypoint_args->hooks_out_fd, entrypoint_args->hooks_err_fd,
                       in_userns > 0, err);
       if (UNLIKELY (ret != 0))
@@ -1362,7 +1363,7 @@ container_init (void *args, char *notify_socket, int sync_socket, libcrun_error_
       if (tmp_err)
         crun_error_release (&tmp_err);
 
-      ret = do_hooks (def, 0, container->context->id, false, NULL, "starting", (hook **) def->hooks->start_container,
+      ret = do_hooks (def, 0, container->context->id, false, NULL, "starting", "startContainer", (hook **) def->hooks->start_container,
                       def->hooks->start_container_len, entrypoint_args->hooks_out_fd, entrypoint_args->hooks_err_fd,
                       in_userns > 0, err);
       if (UNLIKELY (ret != 0))
@@ -1503,7 +1504,7 @@ run_poststop_hooks (libcrun_context_t *context, libcrun_container_t *container, 
       if (UNLIKELY (ret < 0))
         return ret;
 
-      ret = do_hooks (def, 0, id, true, status->bundle, "stopped", (hook **) def->hooks->poststop,
+      ret = do_hooks (def, 0, id, true, status->bundle, "stopped", "poststop", (hook **) def->hooks->poststop,
                       def->hooks->poststop_len, hooks_out_fd, hooks_err_fd, false, err);
       if (UNLIKELY (ret != 0))
         {
@@ -2650,7 +2651,7 @@ libcrun_container_run_internal (libcrun_container_t *container, libcrun_context_
   if (def->hooks && def->hooks->prestart_len)
     {
       libcrun_debug ("Running `prestart` hooks");
-      ret = do_hooks (def, pid, context->id, false, NULL, "created", (hook **) def->hooks->prestart,
+      ret = do_hooks (def, pid, context->id, false, NULL, "created", "prestart", (hook **) def->hooks->prestart,
                       def->hooks->prestart_len, hooks_out_fd, hooks_err_fd, false, err);
       if (UNLIKELY (ret != 0))
         goto fail;
@@ -2658,7 +2659,7 @@ libcrun_container_run_internal (libcrun_container_t *container, libcrun_context_
   if (def->hooks && def->hooks->create_runtime_len)
     {
       libcrun_debug ("Running `create` hooks");
-      ret = do_hooks (def, pid, context->id, false, NULL, "created", (hook **) def->hooks->create_runtime,
+      ret = do_hooks (def, pid, context->id, false, NULL, "created", "createRuntime", (hook **) def->hooks->create_runtime,
                       def->hooks->create_runtime_len, hooks_out_fd, hooks_err_fd, false, err);
       if (UNLIKELY (ret != 0))
         goto fail;
@@ -2702,7 +2703,7 @@ libcrun_container_run_internal (libcrun_container_t *container, libcrun_context_
   if (context->fifo_exec_wait_fd < 0 && def->hooks && def->hooks->poststart_len)
     {
       libcrun_debug ("Running `poststart` hooks");
-      ret = do_hooks (def, pid, context->id, false, NULL, "running", (hook **) def->hooks->poststart,
+      ret = do_hooks (def, pid, context->id, false, NULL, "running", "poststart", (hook **) def->hooks->poststart,
                       def->hooks->poststart_len, hooks_out_fd, hooks_err_fd, false, err);
       if (UNLIKELY (ret != 0))
         goto fail;
@@ -3141,7 +3142,7 @@ libcrun_container_start (libcrun_context_t *context, const char *id, libcrun_err
       if (UNLIKELY (ret < 0))
         return ret;
 
-      ret = do_hooks (def, status.pid, context->id, false, status.bundle, "running", (hook **) def->hooks->poststart,
+      ret = do_hooks (def, status.pid, context->id, false, status.bundle, "running", "poststart", (hook **) def->hooks->poststart,
                       def->hooks->poststart_len, hooks_out_fd, hooks_err_fd, false, err);
       if (UNLIKELY (ret != 0))
         {
