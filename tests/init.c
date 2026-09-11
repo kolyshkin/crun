@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sched.h>
+#include <signal.h>
 
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
@@ -803,6 +804,28 @@ main (int argc, char **argv)
     }
   if (strcmp (argv[1], "pause") == 0)
     {
+      do_pause ();
+    }
+  if (strcmp (argv[1], "pdeathsig-on-usr1") == 0)
+    {
+      sigset_t set;
+      int sig;
+
+      /* Set a parent death signal only once told to, so that the parent at
+         that time (not the runtime which started us) is the one that counts.
+         SIGUSR1 is blocked, as it would otherwise be dropped when we are a
+         PID namespace init with no handler for it.  Report that the parent
+         death signal is set by changing the process name.  */
+      sigemptyset (&set);
+      sigaddset (&set, SIGUSR1);
+      if (sigprocmask (SIG_BLOCK, &set, NULL) < 0)
+        error (EXIT_FAILURE, errno, "sigprocmask");
+      if (sigwait (&set, &sig) != 0)
+        error (EXIT_FAILURE, 0, "sigwait");
+      if (prctl (PR_SET_PDEATHSIG, SIGKILL) < 0)
+        error (EXIT_FAILURE, errno, "prctl PR_SET_PDEATHSIG");
+      if (prctl (PR_SET_NAME, "pdeathsig-set") < 0)
+        error (EXIT_FAILURE, errno, "prctl PR_SET_NAME");
       do_pause ();
     }
   if (strcmp (argv[1], "memhog") == 0)

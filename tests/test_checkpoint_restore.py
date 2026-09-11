@@ -185,7 +185,7 @@ def _wait_running(cid):
 
 # A restore without --detach must keep the restored init as a child of crun,
 # so that crun can wait for it and report its exit status.
-def test_cr_restore_foreground():
+def _cr_restore_foreground(name, args, before_checkpoint=None):
     if r := _check_cr_requirements():
         return r
 
@@ -193,7 +193,7 @@ def test_cr_restore_foreground():
     cr_dir = os.path.join(get_tests_root(), 'checkpoint-foreground')
     work_dir = os.path.join(get_tests_root(), 'work-dir')
     conf = base_config()
-    conf['process']['args'] = ['/init', 'pause']
+    conf['process']['args'] = args
     add_all_namespaces(conf)
     try:
         _, cid = run_and_get_output(
@@ -203,8 +203,12 @@ def test_cr_restore_foreground():
             detach=True
         )
 
-        if _wait_running(cid) == 0:
-            logger.info("test_cr_restore_foreground: the container did not start")
+        pid = _wait_running(cid)
+        if pid == 0:
+            logger.info("%s: the container did not start", name)
+            return -1
+
+        if before_checkpoint is not None and before_checkpoint(cid, pid) < 0:
             return -1
 
         run_crun_command([
@@ -229,15 +233,22 @@ def test_cr_restore_foreground():
         pid = _wait_running(cid)
         if pid == 0:
             crun.kill()
-            logger.info("test_cr_restore_foreground: the container was not restored: %s",
-                        crun.stderr.read().decode())
+            logger.info("%s: the container was not restored: %s",
+                        name, crun.stderr.read().decode())
             return -1
 
         ppid = _get_ppid(pid)
         if ppid != crun.pid:
-            logger.info("test_cr_restore_foreground: init %d has ppid %d, expected crun %d",
-                        pid, ppid, crun.pid)
+            logger.info("%s: init %d has ppid %d, expected crun %d",
+                        name, pid, ppid, crun.pid)
             crun.kill()
+            return -1
+
+        # The restored container must keep running.
+        time.sleep(1)
+        if crun.poll() is not None:
+            logger.info("%s: the restored container exited, crun status %d: %s",
+                        name, crun.returncode, crun.stderr.read().decode())
             return -1
 
         run_crun_command(["kill", cid, "KILL"])
@@ -245,17 +256,42 @@ def test_cr_restore_foreground():
             ret = crun.wait(timeout=30)
         except subprocess.TimeoutExpired:
             crun.kill()
-            logger.info("test_cr_restore_foreground: crun did not exit with the container")
+            logger.info("%s: crun did not exit with the container", name)
             return -1
 
         if ret != 137:
-            logger.info("test_cr_restore_foreground: crun exited with %d, expected 137: %s",
-                        ret, crun.stderr.read().decode())
+            logger.info("%s: crun exited with %d, expected 137: %s",
+                        name, ret, crun.stderr.read().decode())
             return -1
     finally:
         if cid is not None:
             run_crun_command(["delete", "-f", cid])
     return 0
+
+
+def test_cr_restore_foreground():
+    return _cr_restore_foreground("test_cr_restore_foreground", ['/init', 'pause'])
+
+
+def _set_pdeathsig(cid, pid):
+    # Keep sending SIGUSR1 until init reports it has set its parent death
+    # signal, as the first one might arrive before init blocks it.
+    for _ in range(100):
+        run_crun_command(["kill", cid, "USR1"])
+        time.sleep(0.1)
+        with open('/proc/%d/comm' % pid) as f:
+            if f.read().strip() == 'pdeathsig-set':
+                return 0
+    logger.info("_set_pdeathsig: init %d did not set its parent death signal", pid)
+    return -1
+
+
+# The restored init must not get its parent death signal (restored by CRIU)
+# right after the restore, as its parent, crun, stays alive.
+def test_cr_restore_foreground_pdeathsig():
+    return _cr_restore_foreground("test_cr_restore_foreground_pdeathsig",
+                                  ['/init', 'pdeathsig-on-usr1'],
+                                  before_checkpoint=_set_pdeathsig)
 
 
 def test_cr_pre_dump():
@@ -513,6 +549,7 @@ all_tests = {
     "checkpoint-restore-masked-paths": test_cr_masked_paths,
     "checkpoint-restore-ext-ns": test_cr_with_ext_ns,
     "checkpoint-restore-foreground": test_cr_restore_foreground,
+    "checkpoint-restore-foreground-pdeathsig": test_cr_restore_foreground_pdeathsig,
     "checkpoint-restore-pre-dump": test_cr_pre_dump,
     "checkpoint-restore-with-runc-config": test_cr_with_runc_config,
     "checkpoint-restore-with-crun-config": test_cr_with_crun_config,
