@@ -782,6 +782,28 @@ get_mount_flags (const char *name, int current_flags, int *found, unsigned long 
   return current_flags | prop->flags;
 }
 
+/* Whether any of the mount options sets or clears a mount flag, other
+   than MS_BIND, MS_REC and the propagation ones.  */
+static bool
+has_mount_flag_options (runtime_spec_schema_defs_mount *mount)
+{
+  size_t i;
+
+  for (i = 0; i < mount->options_len; i++)
+    {
+      const struct propagation_flags_s *prop;
+
+      if (mount->options[i] == NULL)
+        continue;
+
+      prop = libcrun_str2mount_flags (mount->options[i]);
+      if (prop && (prop->flags & ~(MS_BIND | ALL_PROPAGATIONS)))
+        return true;
+    }
+
+  return false;
+}
+
 static unsigned long
 get_mount_flags_or_option (const char *name, int current_flags, unsigned long *extra_flags, char **option, uint64_t *rec_clear, uint64_t *rec_set)
 {
@@ -2962,7 +2984,11 @@ process_single_mount (libcrun_container_t *container, const char *rootfs,
       if (LIKELY (ret == 0))
         {
           unsigned long remaining_flags = flags & ~MS_BIND;
-          if (remaining_flags)
+
+          /* A remount is needed not only to set some flags, but also to
+             clear the ones set on the source (e.g. "bind,dev" on a nodev
+             source), in which case remaining_flags might be empty.  */
+          if (remaining_flags || has_mount_flag_options (mount))
             {
               ret = do_mount (container, NULL, source_mountfd, target, NULL, remaining_flags, data, LABEL_NONE, err);
               if (UNLIKELY (ret < 0))
