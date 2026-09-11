@@ -1063,6 +1063,11 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
         return crun_make_error (err, -ret, "error setting LSM mount context to `%s`", cr_options->lsm_mount_context);
     }
 
+  /* do realpath on root */
+  bundle_cleanup = realpath (status->bundle, NULL);
+  if (UNLIKELY (bundle_cleanup == NULL))
+    bundle_cleanup = xstrdup (status->bundle);
+
   /* Tell CRIU about external bind mounts. */
   for (i = 0; i < def->mounts_len; i++)
     {
@@ -1072,6 +1077,8 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
           /* We need to resolve mount destination inside container's root for CRIU to handle. */
           char buf[PATH_MAX];
           const char *dest_in_root;
+          const char *source = def->mounts[i]->source;
+          cleanup_free char *abs_source = NULL;
 
           if (nofollow)
             return crun_make_error (err, 0, "CRIU does not support `src-nofollow` for bind mounts");
@@ -1085,20 +1092,25 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
           if (has_prefix (dest_in_root, status->rootfs))
             dest_in_root += safe_strlen (status->rootfs);
 
-          ret = libcriu_wrapper->criu_add_ext_mount (dest_in_root, def->mounts[i]->source);
+          /* A relative source is relative to the bundle, while CRIU would
+             resolve it relative to its own working directory.  */
+          if (source && source[0] != '/')
+            {
+              ret = append_paths (&abs_source, err, bundle_cleanup, source, NULL);
+              if (UNLIKELY (ret < 0))
+                return ret;
+              source = abs_source;
+            }
+
+          ret = libcriu_wrapper->criu_add_ext_mount (dest_in_root, source);
           if (UNLIKELY (ret < 0))
-            return crun_make_error (err, -ret, "CRIU: failed adding external mount to `%s`", def->mounts[i]->source);
+            return crun_make_error (err, -ret, "CRIU: failed adding external mount to `%s`", source);
         }
     }
 
   ret = register_masked_paths_mounts (def, container, libcriu_wrapper, true, err);
   if (UNLIKELY (ret < 0))
     return ret;
-
-  /* do realpath on root */
-  bundle_cleanup = realpath (status->bundle, NULL);
-  if (UNLIKELY (bundle_cleanup == NULL))
-    bundle_cleanup = xstrdup (status->bundle);
 
   /* Mount the container rootfs for CRIU. */
   ret = append_paths (&root, err, bundle_cleanup, "criu-root", NULL);
