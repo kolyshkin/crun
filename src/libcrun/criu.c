@@ -872,7 +872,8 @@ libcrun_container_checkpoint_linux_criu (libcrun_container_status_t *status, lib
 }
 
 static int
-prepare_restore_mounts (runtime_spec_schema_config_schema *def, char *root, libcrun_error_t *err)
+prepare_restore_mounts_internal (runtime_spec_schema_config_schema *def, char *root, const char **mounted,
+                                 size_t *n_mounted, libcrun_error_t *err)
 {
   uint32_t i;
 
@@ -941,6 +942,28 @@ prepare_restore_mounts (runtime_spec_schema_config_schema *def, char *root, libc
           if (UNLIKELY (ret < 0))
             return ret;
         }
+
+      /* Mount a bind mount source now, so that the mountpoints of the
+       * mounts inside it (e.g. a nested bind mount) are created in the
+       * source, where CRIU expects them.  This also happens during the
+       * initial container creation, as the mounts are done in order.  */
+      if (is_bind_mount (def->mounts[i], NULL, &nofollow))
+        {
+          cleanup_close int dst_fd = -1;
+          proc_fd_path_t fd_path;
+
+          dst_fd = safe_openat (root_fd, root, dest, O_PATH | O_CLOEXEC, 0, err);
+          if (UNLIKELY (dst_fd < 0))
+            return dst_fd;
+
+          /* Not recursive: the source might contain ROOT itself (e.g. when
+           * it is the bundle directory), and it is not needed anyway.  */
+          get_proc_self_fd_path (fd_path, dst_fd);
+          if (UNLIKELY (mount (def->mounts[i]->source, fd_path, NULL, MS_BIND, NULL) < 0))
+            return crun_make_error (err, errno, "bind mount `%s` to `%s`", def->mounts[i]->source, dest);
+
+          mounted[(*n_mounted)++] = dest;
+        }
     }
 
   return 0;
@@ -958,6 +981,43 @@ move_back_to_cgroups (const char *cgroups)
       libcrun_warning ("cannot move back to the original cgroup: %s", tmp_err->msg);
       crun_error_release (&tmp_err);
     }
+}
+
+/* Recreate the mountpoints which do not exist in the container rootfs
+ * mounted at ROOT, the same way it is done on the container creation.  */
+static int
+prepare_restore_mounts (runtime_spec_schema_config_schema *def, char *root, libcrun_error_t *err)
+{
+  cleanup_free const char **mounted = xmalloc0 (sizeof (char *) * (def->mounts_len + 1));
+  cleanup_close int root_fd = -1;
+  size_t n_mounted = 0;
+  int ret;
+
+  ret = prepare_restore_mounts_internal (def, root, mounted, &n_mounted, err);
+
+  /* The bind mounts done above are only needed to create the mountpoints,
+   * and CRIU restores the mounts itself, so undo them, in reverse order. */
+  if (n_mounted > 0)
+    root_fd = open (root, O_PATH | O_CLOEXEC);
+  while (root_fd >= 0 && n_mounted > 0)
+    {
+      libcrun_error_t tmp_err = NULL;
+      const char *dest = mounted[--n_mounted];
+      cleanup_close int dst_fd = -1;
+      proc_fd_path_t fd_path;
+
+      dst_fd = safe_openat (root_fd, root, dest, O_PATH | O_CLOEXEC, 0, &tmp_err);
+      if (UNLIKELY (dst_fd < 0))
+        {
+          crun_error_release (&tmp_err);
+          continue;
+        }
+      get_proc_self_fd_path (fd_path, dst_fd);
+      if (UNLIKELY (umount2 (fd_path, MNT_DETACH) < 0 && ret >= 0))
+        ret = crun_make_error (err, errno, "unmount `%s`", dest);
+    }
+
+  return ret;
 }
 
 int
@@ -1063,6 +1123,11 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
         return crun_make_error (err, -ret, "error setting LSM mount context to `%s`", cr_options->lsm_mount_context);
     }
 
+  /* do realpath on root */
+  bundle_cleanup = realpath (status->bundle, NULL);
+  if (UNLIKELY (bundle_cleanup == NULL))
+    bundle_cleanup = xstrdup (status->bundle);
+
   /* Tell CRIU about external bind mounts. */
   for (i = 0; i < def->mounts_len; i++)
     {
@@ -1072,6 +1137,8 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
           /* We need to resolve mount destination inside container's root for CRIU to handle. */
           char buf[PATH_MAX];
           const char *dest_in_root;
+          const char *source = def->mounts[i]->source;
+          cleanup_free char *abs_source = NULL;
 
           if (nofollow)
             return crun_make_error (err, 0, "CRIU does not support `src-nofollow` for bind mounts");
@@ -1085,20 +1152,25 @@ libcrun_container_restore_linux_criu (libcrun_container_status_t *status, libcru
           if (has_prefix (dest_in_root, status->rootfs))
             dest_in_root += safe_strlen (status->rootfs);
 
-          ret = libcriu_wrapper->criu_add_ext_mount (dest_in_root, def->mounts[i]->source);
+          /* A relative source is relative to the bundle, while CRIU would
+             resolve it relative to its own working directory.  */
+          if (source && source[0] != '/')
+            {
+              ret = append_paths (&abs_source, err, bundle_cleanup, source, NULL);
+              if (UNLIKELY (ret < 0))
+                return ret;
+              source = abs_source;
+            }
+
+          ret = libcriu_wrapper->criu_add_ext_mount (dest_in_root, source);
           if (UNLIKELY (ret < 0))
-            return crun_make_error (err, -ret, "CRIU: failed adding external mount to `%s`", def->mounts[i]->source);
+            return crun_make_error (err, -ret, "CRIU: failed adding external mount to `%s`", source);
         }
     }
 
   ret = register_masked_paths_mounts (def, container, libcriu_wrapper, true, err);
   if (UNLIKELY (ret < 0))
     return ret;
-
-  /* do realpath on root */
-  bundle_cleanup = realpath (status->bundle, NULL);
-  if (UNLIKELY (bundle_cleanup == NULL))
-    bundle_cleanup = xstrdup (status->bundle);
 
   /* Mount the container rootfs for CRIU. */
   ret = append_paths (&root, err, bundle_cleanup, "criu-root", NULL);
