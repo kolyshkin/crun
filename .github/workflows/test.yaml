@@ -143,6 +143,23 @@ jobs:
           # add-apt-repository runs apt-get update so we don't have to.
           sudo apt-get install -q -y criu automake libtool autotools-dev libseccomp-dev git make libcap-dev pkg-config gcc libsystemd-dev gperf libjson-c-dev libprotobuf-c-dev mawk sshfs uidmap
 
+      # TODO: remove once a libcriu with criu_set_lazy_pages is released,
+      # see https://github.com/checkpoint-restore/criu/pull/3146.
+      - name: checkout criu
+        uses: actions/checkout@v7
+        with:
+          repository: kolyshkin/criu
+          ref: libcriu-lazy-pages
+          path: criu
+
+      - name: install libcriu with lazy pages support
+        run: |
+          sudo criu/contrib/dependencies/apt-packages.sh
+          make -C criu -j"$(nproc)" lib
+          sudo make -C criu install-lib PREFIX=/usr SKIP_PIP_INSTALL=1
+          sudo ldconfig
+          grep -q criu_set_lazy_pages /usr/include/criu/criu.h
+
       - name: install bats
         uses: bats-core/bats-action@4.0.0
         with:

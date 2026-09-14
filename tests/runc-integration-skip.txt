@@ -38,8 +38,6 @@ cgroups.bats: runc run (cgroup v2 resources.unified override)
 # --ignore-paused is not implemented.
 cgroups.bats: runc exec --ignore-paused
 cgroups.bats: runc run/create should error for a non-empty cgroup
-# --lazy-pages not implemented.
-checkpoint.bats: checkpoint --lazy-pages and restore
 cpu_affinity.bats: runc exec [CPU affinity, only initial set from process.json]
 cpu_affinity.bats: runc exec [CPU affinity, initial and final set from process.json]
 cpu_affinity.bats: runc exec [CPU affinity, initial and final set from config.json]
