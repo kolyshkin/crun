@@ -18,53 +18,23 @@ jobs:
     name: Build ${{ matrix.build }} on ${{ matrix.arch }}
     permissions:
       contents: read
-      packages: write
 
     strategy:
       fail-fast: false
       matrix:
-        # The static and the shared build are separate jobs: under emulation
-        # each one takes tens of minutes, so running them in parallel roughly
-        # halves the wall clock time.
         build: [static, shared]
-        arch:
-          - armv7
-#          - aarch64
-#          - s390x
-#          - ppc64le
-          - riscv64
-        distro: [ubuntu_latest]
+        # Debian architecture names.
+        arch: [armhf, riscv64]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           submodules: true
-          set-safe-directory: true
           persist-credentials: false
 
-      # Running autoreconf natively is much faster than under emulation.
-      # The generated files are architecture independent.
-      - name: Generate the configure script
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y --no-install-recommends autoconf automake libtool pkg-config
-          ./autogen.sh
-
-      - uses: uraimo/run-on-arch-action@fa1f3e7de95534497266c7265950b5188355fbfb # v3.2.1
-        name: Build
-        id: build
-        with:
-          arch: ${{ matrix.arch }}
-          distro: ${{ matrix.distro }}
-
-          githubToken: ${{ github.token }}
-
-          install: |
-            apt-get update -y
-            apt-get install -y libseccomp-dev git make libcap-dev cmake pkg-config gcc wget go-md2man libsystemd-dev gperf clang-format libjson-c-dev libprotobuf-c-dev clang mawk
-
-          run: |
-            find "$(pwd)" -name '.git' -exec bash -c 'git config --global --add safe.directory ${0%/.git}' {} \;
-            ./tests/ci.sh cross-${{ matrix.build }}
+      - name: Build
+        env:
+          CROSS_ARCH: ${{ matrix.arch }}
+        run: ./tests/ci.sh cross-${{ matrix.build }}
 
   Test:
     runs-on: ubuntu-latest
